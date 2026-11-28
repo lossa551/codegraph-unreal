@@ -775,6 +775,23 @@ could be a different file of the same name. The next sync applies a change.
 Includes built from the including file's own folder, like
 `__DIR__ . '/inc/a.php'`, need neither.
 
+### Unreal Engine projects
+
+An Unreal project (one with a `*.Build.cs`) gets its reflection markup in the
+graph: `UFUNCTION`, `UPROPERTY` and `UCLASS` specifiers show on each symbol and
+are searchable (`BlueprintCallable`, `Server`, `ReplicatedUsing`…), a call to a
+Blueprint native event or an RPC reaches its `_Implementation`, and a dynamic
+delegate's `Broadcast` reaches the handlers bound with `AddDynamic`. To link
+`Config` properties to the `.ini` keys that set them, and to keep Unreal's
+generated folders out, add this to `codegraph.json`:
+
+```json
+{
+  "extensions": { ".ini": "properties" },
+  "exclude": ["Binaries/", "Intermediate/", "Saved/", "DerivedDataCache/", "Content/", "Plugins/*/Binaries/", "Plugins/*/Intermediate/"]
+}
+```
+
 ## Telemetry
 
 CodeGraph collects **anonymous usage statistics** — which tools and commands get

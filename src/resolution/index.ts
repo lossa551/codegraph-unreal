@@ -708,6 +708,8 @@ export class ReferenceResolver {
       this.queries.insertNodes(added);
       const ids = new Set(added.map((n) => n.id));
       this.queries.insertUnresolvedRefsBatch(result.references.filter((r) => ids.has(r.fromNodeId)));
+      const edges = (result.edges ?? []).filter((e) => ids.has(e.source) || ids.has(e.target));
+      if (edges.length > 0) this.queries.insertEdges(edges);
       changed += added.length;
     }
     return changed;

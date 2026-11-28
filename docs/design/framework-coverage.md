@@ -246,6 +246,26 @@ preset says exactly this for PHP.
 
 ---
 
+## Unreal Engine (C++ reflection)
+
+`frameworks/unreal.ts`, tests in `unreal.test.ts`. Not a router: it puts the
+meaning of the reflection markup the C/C++ extractor blanks back in the graph.
+
+| Fact | Produced by |
+|---|---|
+| `UCLASS`/`USTRUCT`/`UENUM`/`UFUNCTION` specifiers as `decorators` and a `signature` prefix on the type and on the `.cpp` method definition | `postExtract` |
+| a `method` node for each `BlueprintImplementableEvent`, `BlueprintNativeEvent` and `Server`/`Client`/`NetMulticast` declaration, with `calls` to `_Implementation` / `_Validate` | `extract` (headers) |
+| a `property` node per `UPROPERTY`, `contains` from its class, `references` to its `ReplicatedUsing` handler, `calls` to each `AddDynamic` handler | `crossFileNodes` (id hashes its references and parent, so a new binding replaces it; `CrossFileNodes.edges` carries the `contains` edge) |
+| `X.Broadcast(...)` onto the delegate property; `CVarX.GetValueOn*()` (also `Ns::CVarX`) onto the console variable | `resolve` |
+| `constant` nodes for `TAutoConsoleVariable` / `FAutoConsoleCommand*` | `extract` |
+| `module` nodes from `*.Build.cs` with `imports` between project modules | `extract` + `resolve` |
+| `constant` nodes for keys under `[/Script/Module.Class]` in `.ini`, `references` to the `Config` property; engine sections skipped, `+Key=` array lines folded into one node | `extract` (`.ini` mapped to `properties` in `codegraph.json`) + `resolve` |
+
+Left: Blueprint assets (binary `.uasset`, needs an editor-side export),
+`DOREPLIFETIME` → property links, engine source (not indexed by default).
+
+---
+
 ## Traps a new router will hit
 
 Each of these cost real debugging time; they are not hypothetical.

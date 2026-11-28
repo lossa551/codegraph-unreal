@@ -38,6 +38,7 @@ import { expoRouterResolver } from './expo-router';
 import { fabricViewResolver } from './fabric';
 import { cicsResolver } from './cics';
 import { terraformResolver } from './terraform';
+import { unrealResolver } from './unreal';
 
 /**
  * All registered framework resolvers
@@ -105,6 +106,8 @@ const FRAMEWORK_RESOLVERS: FrameworkResolver[] = [
   cicsResolver,
   // Terraform / OpenTofu — disambiguate var/local/module/resource refs to same-dir module
   terraformResolver,
+  // Unreal Engine — reflection markup (UFUNCTION/UPROPERTY specifiers, _Implementation bodies, delegates, cvars, modules, config)
+  unrealResolver,
 ];
 
 /**

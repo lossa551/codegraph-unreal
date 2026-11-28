@@ -14,6 +14,7 @@ and adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### New Features
 
+- Unreal Engine projects: `UFUNCTION`, `UPROPERTY` and `UCLASS` specifiers are searchable and shown on each symbol, calls to Blueprint native events and RPCs reach their `_Implementation`, reflected properties are indexed with their `OnRep_` handlers and delegate listeners, and console variables, `.Build.cs` module dependencies and `.ini` config keys (with `".ini": "properties"` in `codegraph.json`) are linked.
 - `codegraph_callers` and `codegraph_callees` take an `offset`, so an agent can page through a list longer than `limit`, and a cut list names the offset of the next page. Thanks @blairjordan. (#3449)
 - `codegraph init` is faster on large projects: the background workers that link references start sooner, and they and the indexer's own writes no longer hold each other up. (#3472)
 
