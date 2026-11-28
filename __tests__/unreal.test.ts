@@ -119,7 +119,7 @@ void UHitComponent::BeginPlay()
 
 void UHitComponent::ApplyHit(const FHitInfo& Info)
 {
-	if (CVarHitDebug.GetValueOnGameThread() > 0)
+	if (CVarHitDebug.GetValueOnGameThread() > 0 || ::CVarHitDebug.GetValueOnAnyThread() > 1)
 	{
 		return;
 	}
@@ -184,6 +184,7 @@ const INI = `[/Script/Demo.HitComponent]
 MaxSimulated=6
 ; a comment
 +Unknown=1
++Unknown=2
 
 [/Script/EngineSettings.GeneralProjectSettings]
 ProjectID=0
@@ -277,12 +278,11 @@ describe('per-file extraction', () => {
     ]);
   });
 
-  it('reads config keys under /Script sections only', () => {
+  it('reads config keys under project /Script sections, one node per array key', () => {
     const { nodes, references } = extract('Config/DefaultGame.ini', INI);
-    expect(nodes.map((n) => [n.name, n.startLine])).toEqual([
-      ['HitComponent.MaxSimulated', 2],
-      ['HitComponent.Unknown', 4],
-      ['GeneralProjectSettings.ProjectID', 7],
+    expect(nodes.map((n) => [n.name, n.startLine, n.endLine])).toEqual([
+      ['HitComponent.MaxSimulated', 2, 2],
+      ['HitComponent.Unknown', 4, 5],
     ]);
     expect(references[0]!.referenceName).toBe('unreal:config:HitComponent::MaxSimulated');
   });
@@ -333,7 +333,9 @@ describe('an indexed Unreal project', () => {
     const apply = node('UHitComponent::ApplyHit', 'method');
     expect(apply.filePath).toBe('Source/Demo/Combat/HitComponent.cpp');
     expect(apply.signature).toBe('UFUNCTION(BlueprintCallable, Category="Hit") void ApplyHit(const FHitInfo& Info)');
-    expect(node('UHitComponent::ServerApplyHit_Implementation').decorators).toContain('Server');
+    const impl = node('UHitComponent::ServerApplyHit_Implementation');
+    expect(impl.decorators).toContain('Server');
+    expect(impl.signature).toBe('UFUNCTION(Server, Reliable, WithValidation) void ServerApplyHit_Implementation(const FHitInfo& Info)');
   });
 
   it('finds reflected functions by their specifier', () => {
@@ -354,6 +356,14 @@ describe('an indexed Unreal project', () => {
   it('indexes UPROPERTY members with their replication and delegate links', () => {
     expect(out(node('UHitComponent::Health', 'property').id)).toEqual(['UHitComponent::OnRep_Health']);
     expect(out(node('UHitComponent::OnHit', 'property').id, 'calls')).toEqual(['UHitComponent::HandleOwnerHit']);
+    const members = cg
+      .getOutgoingEdges(node('UHitComponent', 'class').id)
+      .filter((e) => e.kind === 'contains')
+      .map((e) => cg.getNode(e.target)!)
+      .filter((n) => n.kind === 'property')
+      .map((n) => n.name)
+      .sort();
+    expect(members).toEqual(['Curves', 'Health', 'MaxSimulated', 'OnHit', 'bIsDown']);
     expect(node('UHitComponent::MaxSimulated', 'property').signature).toBe(
       'UPROPERTY(Config, EditAnywhere, Category="Hit", meta=(ClampMin="0")) int32 MaxSimulated'
     );

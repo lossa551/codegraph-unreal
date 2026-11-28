@@ -71,7 +71,7 @@
 
 import * as crypto from 'crypto';
 import { generateNodeId } from '../../extraction/tree-sitter-helpers';
-import type { Language, Node } from '../../types';
+import type { Edge, Language, Node } from '../../types';
 import type {
   CrossFileNodes,
   FrameworkExtractionResult,
@@ -654,16 +654,35 @@ function extractModule(filePath: string, source: string, out: FrameworkExtractio
 // extract(): config (.ini)
 // ---------------------------------------------------------------------------
 
+/**
+ * Script modules the engine and its stock plugins ship. Their settings are
+ * engine classes this index never holds, so their keys would be nodes that
+ * link to nothing.
+ */
+const ENGINE_SCRIPT_MODULES = new Set([
+  'Engine', 'EngineSettings', 'UnrealEd', 'InputCore', 'EnhancedInput', 'Slate', 'SlateCore', 'UMG', 'UMGEditor',
+  'AIModule', 'NavigationSystem', 'GameplayTags', 'GameplayAbilities', 'Niagara', 'NiagaraEditor', 'Chaos', 'ChaosSolverEngine',
+  'PhysicsCore', 'AudioMixer', 'AudioEditor', 'MovieScene', 'LevelSequence', 'HardwareTargeting', 'MoviePlayer',
+  'WindowsTargetPlatform', 'WindowsTargetPlatformSettings', 'MacTargetPlatform', 'LinuxTargetPlatform', 'IOSRuntimeSettings',
+  'AndroidRuntimeSettings', 'AndroidFileServerEditor', 'Paper2D', 'NetcodeUnitTest', 'OnlineSubsystem', 'OnlineSubsystemUtils',
+  'OnlineSubsystemSteam', 'CommonUI', 'CommonInput', 'DeveloperSettings', 'Landscape', 'Foliage', 'MeshDescription',
+  'StaticMeshDescription', 'Renderer', 'RenderCore', 'MetasoundEngine', 'MetasoundEditor', 'WorldPartitionEditor',
+  'LiveCoding', 'SourceControl', 'ContentBrowser', 'BlueprintGraph', 'Kismet', 'KismetCompiler', 'CoreUObject',
+  'Interchange', 'InterchangeEngine', 'InterchangeEditor', 'InterchangeImport', 'Localization', 'PythonScriptPlugin',
+  'DataValidation', 'AssetTools', 'TemplateSequence', 'MassEntity', 'MassSpawner', 'StateTreeModule', 'ModelingToolsEditorMode',
+]);
+
 function extractIni(filePath: string, source: string, out: FrameworkExtractionResult): void {
   const lines = source.split(/\r?\n/);
   let section: { module: string; cls: string } | null = null;
-  const seen = new Set<string>();
+  // One node per key per section: `+Key=` array lines add values to one key.
+  const seen = new Map<string, Node>();
   lines.forEach((raw, i) => {
     const text = raw.trim();
     if (!text || text.startsWith(';') || text.startsWith('#')) return;
     const sec = /^\[\/Script\/([A-Za-z_]\w*)\.([A-Za-z_]\w*)\]$/.exec(text);
     if (sec) {
-      section = { module: sec[1]!, cls: sec[2]! };
+      section = ENGINE_SCRIPT_MODULES.has(sec[1]!) ? null : { module: sec[1]!, cls: sec[2]! };
       return;
     }
     if (text.startsWith('[')) {
@@ -675,13 +694,17 @@ function extractIni(filePath: string, source: string, out: FrameworkExtractionRe
     if (!kv) return;
     const s = section as { module: string; cls: string };
     const key = `${s.cls}.${kv[1]}`;
+    const qualified = `${filePath}::[/Script/${s.module}.${s.cls}]${kv[1]}`;
+    const prior = seen.get(qualified);
+    if (prior) {
+      prior.endLine = i + 1;
+      return;
+    }
     const line = i + 1;
-    const id = generateNodeId(filePath, 'constant', `${key}@${line}`, line);
-    if (seen.has(id)) return;
-    seen.add(id);
-    const node = makeNode(filePath, 'constant', key, `${filePath}::[/Script/${s.module}.${s.cls}]${kv[1]}`, line, 'properties', {
+    const node = makeNode(filePath, 'constant', key, qualified, line, 'properties', {
       signature: text.length > 160 ? `${text.slice(0, 157)}...` : text,
-    }, id);
+    });
+    seen.set(qualified, node);
     out.nodes.push(node);
     out.references.push(ref(node.id, `unreal:config:${s.cls}::${kv[1]}`, 'references', line, filePath, 'properties'));
   });
@@ -743,6 +766,7 @@ function buildPropertyNodes(context: ResolutionContext): CrossFileNodes {
   const files = context.getAllFiles();
   const nodes: Node[] = [];
   const references: UnresolvedRef[] = [];
+  const edges: Edge[] = [];
 
   // Every binding in the project, by member name.
   const bindings = new Map<string, Binding[]>();
@@ -764,6 +788,9 @@ function buildPropertyNodes(context: ResolutionContext): CrossFileNodes {
     const src = context.readFile(f);
     if (!src || !hasReflection(src)) continue;
     const language = cppLanguage(f);
+    const fileNodes = context.getNodesInFile(f);
+    const ownerNode = (owner: string): Node | undefined =>
+      fileNodes.find((n) => n.name === owner && (n.kind === 'class' || n.kind === 'struct' || n.kind === 'interface'));
     for (const m of scanReflection(src).members) {
       if (m.macro !== 'UPROPERTY' || !m.owner) continue;
       const qualifiedName = `${m.owner}::${m.name}`;
@@ -785,7 +812,12 @@ function buildPropertyNodes(context: ResolutionContext): CrossFileNodes {
         }
       }
       const unique = [...new Map(targets.map((t) => [`${t.kind}:${t.name}`, t])).values()];
-      const id = `${PROPERTY_ID}${f}::${qualifiedName}:${hash(signature + '|' + m.line + '|' + unique.map((t) => t.kind + t.name).join(','))}`;
+      // The class or struct that declares it, for the `contains` edge member
+      // lists read. Its id is in this node's, so a re-extracted class (a new
+      // id) brings the edge back with a new node.
+      const parent = ownerNode(m.owner);
+      const id = `${PROPERTY_ID}${f}::${qualifiedName}:${hash(signature + '|' + m.line + '|' + (parent?.id ?? '') + '|' + unique.map((t) => t.kind + t.name).join(','))}`;
+      if (parent) edges.push({ source: parent.id, target: id, kind: 'contains' });
       nodes.push(
         makeNode(f, 'property', m.name, qualifiedName, m.line, language, {
           signature,
@@ -796,7 +828,7 @@ function buildPropertyNodes(context: ResolutionContext): CrossFileNodes {
       for (const t of unique) references.push(ref(id, t.name, t.kind, m.line, f, language));
     }
   }
-  return { kind: 'property', nodes, references, owns: (n) => n.id.startsWith(PROPERTY_ID) };
+  return { kind: 'property', nodes, references, edges, owns: (n) => n.id.startsWith(PROPERTY_ID) };
 }
 
 // ---------------------------------------------------------------------------
@@ -836,7 +868,7 @@ function decorateReflected(context: ResolutionContext): Node[] {
           if (n.kind !== 'method' && n.kind !== 'function') continue;
           // The declaration node this resolver mints already carries its markup.
           if (n.decorators?.[0] === 'UFUNCTION' && n.filePath === f && n.startLine === m.line) continue;
-          const u = decorate(updates.get(n.id) ?? n, 'UFUNCTION', m.specs, name === m.name ? m.declaration : null);
+          const u = decorate(updates.get(n.id) ?? n, 'UFUNCTION', m.specs, name === m.name ? m.declaration : m.declaration.replace(new RegExp(`\\b${m.name}(\\s*\\()`), `${name}$1`));
           if (u) updates.set(n.id, u);
         }
       }
@@ -851,7 +883,7 @@ function decorateReflected(context: ResolutionContext): Node[] {
 
 const DELEGATE_CALL_RE = /^(?:this->)?([A-Za-z_]\w*)\s*(?:\.|->)\s*(Broadcast|ExecuteIfBound|Execute)$/;
 const CVAR_READ_RE =
-  /^([A-Za-z_]\w*)\s*(?:\.|->)\s*(GetValueOnGameThread|GetValueOnAnyThread|GetValueOnRenderThread|AsVariable|GetInt|GetFloat|GetBool|GetString)$/;
+  /^(?:::)?(?:[A-Za-z_]\w*::)*([A-Za-z_]\w*)\s*(?:\.|->)\s*(GetValueOnGameThread|GetValueOnAnyThread|GetValueOnRenderThread|AsVariable|GetInt|GetFloat|GetBool|GetString)$/;
 
 function classOf(context: ResolutionContext, nodeId: string): string | null {
   const n = context.getNodeById?.(nodeId);

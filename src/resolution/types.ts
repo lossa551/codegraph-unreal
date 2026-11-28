@@ -4,7 +4,7 @@
  * Types for the reference resolution system.
  */
 
-import { EdgeKind, Language, Node, ReferenceKind } from '../types';
+import { Edge, EdgeKind, Language, Node, ReferenceKind } from '../types';
 
 /**
  * An unresolved reference from extraction
@@ -339,6 +339,13 @@ export interface CrossFileNodes extends FrameworkExtractionResult {
   kind: Node['kind'];
   /** True for a node this pass produces, and for no node extraction does. */
   owns(node: Node): boolean;
+  /**
+   * Edges that hold no reference to resolve, such as the `contains` edge from
+   * an extracted class to a member this pass adds. Inserted with the node they
+   * touch when it is added; a node's id should change with these, since an
+   * unchanged node keeps the edges it has.
+   */
+  edges?: Edge[];
 }
 
 /**
